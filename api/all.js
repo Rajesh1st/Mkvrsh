@@ -3,15 +3,18 @@ const cheerio = require('cheerio');
 
 export default async function handler(req, res) {
     try {
-        // Direct latest page scrape karna (Page 1)
-        const response = await axios.get('https://mkvdrama.net/titles?status=&type=&order=latest&page=1', {
+        // Apni Cloudflare Worker ka URL yahan daal
+        const proxyUrl = 'https://mk-ke-liye.aakigopro1470.workers.dev/?url=';
+        const targetUrl = 'https://mkvdrama.net/titles?status=&type=&order=latest&page=1';
+        
+        // Request CF Worker ke through bhejna
+        const response = await axios.get(proxyUrl + encodeURIComponent(targetUrl), {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
         });
-        const $ = cheerio.load(response.data);
         
+        const $ = cheerio.load(response.data);
         const allShows = [];
         
-        // All shows list parse karna
         $('article.bs').each((i, el) => {
             const a = $(el).find('a.tip');
             const link = a.attr('href');
