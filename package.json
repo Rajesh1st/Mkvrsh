@@ -1,0 +1,14 @@
+{
+  "name": "mkvdrama-api",
+  "version": "1.0.0",
+  "description": "API to scrape mkvdrama.net latest updates",
+  "main": "index.js",
+  "scripts": {
+    "start": "vercel dev"
+  },
+  "dependencies": {
+    "axios": "^1.6.8",
+    "cheerio": "^1.0.0-rc.12",
+    "mongodb": "^6.5.0"
+  }
+}
