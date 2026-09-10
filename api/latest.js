@@ -2,7 +2,6 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const { MongoClient } = require('mongodb');
 
-// Vercel mein MongoDB URI Environment Variable mein daalna
 const uri = process.env.MONGODB_URI;
 let cachedDb = null;
 
@@ -16,20 +15,23 @@ async function connectToDatabase() {
 
 export default async function handler(req, res) {
     try {
-        // Mkvdrama homepage scrape karna
-        const response = await axios.get('https://mkvdrama.net/', {
+        // Apni Cloudflare Worker ka URL yahan daal
+        const proxyUrl = 'https://mk-ke-liye.aakigopro1470.workers.dev/?url=';
+        const targetUrl = 'https://mkvdrama.net/';
+        
+        // Request CF Worker ke through bhejna
+        const response = await axios.get(proxyUrl + encodeURIComponent(targetUrl), {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
         });
-        const $ = cheerio.load(response.data);
         
+        const $ = cheerio.load(response.data);
         const scrapedItems = [];
         
-        // Latest Releases section parse karna
         $('.listupd .bs').each((i, el) => {
             const a = $(el).find('a.tip');
-            const link = a.attr('href'); // e.g., /ok-let-s-get-divorced-gei3xjgp
+            const link = a.attr('href');
             const title = a.attr('title');
-            const episodeText = $(el).find('.epx').text().trim(); // e.g., EP 7 or Completed
+            const episodeText = $(el).find('.epx').text().trim();
             
             if (link && title) {
                 scrapedItems.push({
@@ -44,20 +46,17 @@ export default async function handler(req, res) {
             return res.status(200).json({ success: true, newUpdates: [], message: "No items found" });
         }
 
-        // MongoDB se check karna ki kya naya episode aaya hai
+        // MongoDB Connection
         const db = await connectToDatabase();
         const collection = db.collection('episodes');
         const newUpdates = [];
 
         for (let item of scrapedItems) {
-            // Database mein is show ka purana record dekho
             const existing = await collection.findOne({ postLink: item.postLink });
             
-            // Agar record nahi hai, ya purana episode alag hai, toh yeh "NEW" update hai
             if (!existing || existing.episode !== item.episode) {
                 newUpdates.push(item);
                 
-                // Database update karo taake next time yeh "old" na dikhe
                 await collection.updateOne(
                     { postLink: item.postLink },
                     { $set: { ...item, lastUpdated: new Date() } },
@@ -66,7 +65,6 @@ export default async function handler(req, res) {
             }
         }
 
-        // Sirf naye updates return karna
         res.status(200).json({
             success: true,
             count: newUpdates.length,
