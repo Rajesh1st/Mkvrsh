@@ -21,16 +21,16 @@ async function fetchShowDetails(postUrl) {
                 url: postUrl
             },
             headers: {
-                'X-API-Key': 'animecall_0131M3V5iT35R4p1ng' // Tera token yahan use ho gaya
+                'X-API-Key': 'animecall_0131M3V5iT35R4p1ng' // Tera token
             },
-            timeout: 12000
+            timeout: 15000
         });
         
         // Jo response aayega usme se sirf downloads wala part nikal lo
         if (response.data && response.data.bypassed_url && response.data.bypassed_url.downloads) {
             return response.data.bypassed_url.downloads;
         }
-        return "No downloads found";
+        return null;
 
     } catch (error) {
         console.error(`Error fetching details for ${postUrl}:`, error.message);
@@ -40,11 +40,13 @@ async function fetchShowDetails(postUrl) {
 
 export default async function handler(req, res) {
     try {
-        // Homepage scrape karne ke liye apna CF Worker proxy (yeh wahi rahega)
+        // Agar URL mein ?force=true hai, toh DB check mat kar
+        const forceCheck = req.query.force === 'true';
+
+        // Homepage scrape karne ke li�ye apna CF Worker proxy
         const proxyUrl = 'https://mk-ke-liye.aakigopro1470.workers.dev/?url=';
         const targetUrl = 'https://mkvdrama.net/';
         
-        // 1. Pehle homepage se latest shows ki list lao
         const response = await axios.get(proxyUrl + encodeURIComponent(targetUrl), {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
         });
@@ -68,31 +70,36 @@ export default async function handler(req, res) {
         });
 
         if (scrapedItems.length === 0) {
-            return res.status(200).json({ success: true, newUpdates: [], message: "No items found" });
+            return res.status(200).json({ success: true, newUpdates: [], message: "No items found on homepage" });
         }
 
-        // 2. MongoDB se check karo kya naya aaya hai
         const db = await connectToDatabase();
         const collection = db.collection('episodes');
         const newUpdates = [];
 
         for (let item of scrapedItems) {
-            const existing = await collection.findOne({ postLink: item.postLink });
+            let isNew = forceCheck; // Agar force true hai toh sabko naya maan lo
             
-            if (!existing || existing.episode !== item.episode) {
-                
-                // 3. Agar naya episode hai, toh teri Python wali API se links laao
+            if (!forceCheck) {
+                const existing = await collection.findOne({ postLink: item.postLink });
+                if (!existing || existing.episode !== item.episode) {
+                    isNew = true;
+                }
+            }
+            
+            if (isNew) {
                 console.log(`Fetching download links for: ${item.title}`);
+                // Python API se links laao
                 const downloadLinks = await fetchShowDetails(item.postLink);
                 
                 const finalItem = {
                     ...item,
-                    downloads: downloadLinks
+                    downloads: downloadLinks || "No links found"
                 };
 
                 newUpdates.push(finalItem);
                 
-                // 4. MongoDB update karo
+                // DB update karo (agar force true hai tab bhi DB update hota rahega)
                 await collection.updateOne(
                     { postLink: item.postLink },
                     { $set: { ...finalItem, lastUpdated: new Date() } },
@@ -101,7 +108,6 @@ export default async function handler(req, res) {
             }
         }
 
-        // 5. Final response bhejo
         res.status(200).json({
             success: true,
             count: newUpdates.length,
