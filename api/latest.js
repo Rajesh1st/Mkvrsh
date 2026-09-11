@@ -13,40 +13,38 @@ async function connectToDatabase() {
     return cachedDb;
 }
 
-// Function to fetch download links for a single show via Proxy
-async function fetchShowDetails(postUrl, proxyUrl) {
+// Tere Python script wale API ko call karne ke liye function
+async function fetchShowDetails(postUrl) {
     try {
-        const response = await axios.get(proxyUrl + encodeURIComponent(postUrl), {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        const response = await axios.get('https://mkv-drama-scraper.vercel.app/get', {
+            params: {
+                url: postUrl
+            },
+            headers: {
+                'X-API-Key': 'animecall_0131M3V5iT35R4p1ng' // Tera token yahan use ho gaya
+            },
+            timeout: 12000
         });
-        const $ = cheerio.load(response.data);
         
-        // Yahan hum show page se download links nikalenge
-        // Mkvdrama.net par download links 'a.ts-wpop-link' ya '.dl-link' mein hote hain
-        const downloads = [];
-        $('.listnya a, .dl-link, a.ts-wpop-link').each((i, el) => {
-            const quality = $(el).text().trim(); // e.g., 540p, 720p
-            const link = $(el).attr('href');
-            if (link && quality) {
-                downloads.push({ quality, link });
-            }
-        });
-
-        return downloads.length > 0 ? downloads : "No download links found in HTML";
+        // Jo response aayega usme se sirf downloads wala part nikal lo
+        if (response.data && response.data.bypassed_url && response.data.bypassed_url.downloads) {
+            return response.data.bypassed_url.downloads;
+        }
+        return "No downloads found";
 
     } catch (error) {
         console.error(`Error fetching details for ${postUrl}:`, error.message);
-        return [];
+        return null;
     }
 }
 
 export default async function handler(req, res) {
     try {
-        // Apni Cloudflare Worker ka URL yahan daal
+        // Homepage scrape karne ke liye apna CF Worker proxy (yeh wahi rahega)
         const proxyUrl = 'https://mk-ke-liye.aakigopro1470.workers.dev/?url=';
         const targetUrl = 'https://mkvdrama.net/';
         
-        // Request CF Worker ke through bhejna
+        // 1. Pehle homepage se latest shows ki list lao
         const response = await axios.get(proxyUrl + encodeURIComponent(targetUrl), {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
         });
@@ -73,7 +71,7 @@ export default async function handler(req, res) {
             return res.status(200).json({ success: true, newUpdates: [], message: "No items found" });
         }
 
-        // MongoDB Connection
+        // 2. MongoDB se check karo kya naya aaya hai
         const db = await connectToDatabase();
         const collection = db.collection('episodes');
         const newUpdates = [];
@@ -81,14 +79,12 @@ export default async function handler(req, res) {
         for (let item of scrapedItems) {
             const existing = await collection.findOne({ postLink: item.postLink });
             
-            // Agar DB mein nahi hai, ya purana episode alag hai, toh naya maano
             if (!existing || existing.episode !== item.episode) {
                 
-                // Naye episode ke liye download links bypass karke nikal lo
+                // 3. Agar naya episode hai, toh teri Python wali API se links laao
                 console.log(`Fetching download links for: ${item.title}`);
-                const downloadLinks = await fetchShowDetails(item.postLink, proxyUrl);
+                const downloadLinks = await fetchShowDetails(item.postLink);
                 
-                // Final object mein download links add kar do
                 const finalItem = {
                     ...item,
                     downloads: downloadLinks
@@ -96,7 +92,7 @@ export default async function handler(req, res) {
 
                 newUpdates.push(finalItem);
                 
-                // MongoDB mein update/insert karo
+                // 4. MongoDB update karo
                 await collection.updateOne(
                     { postLink: item.postLink },
                     { $set: { ...finalItem, lastUpdated: new Date() } },
@@ -105,6 +101,7 @@ export default async function handler(req, res) {
             }
         }
 
+        // 5. Final response bhejo
         res.status(200).json({
             success: true,
             count: newUpdates.length,
